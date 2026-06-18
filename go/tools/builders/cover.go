@@ -106,7 +106,10 @@ func instrumentForCoverage(
 // currently runs as an alternative to "go tool cover" statement instrumentation
 // (which cannot emit branch coverage). Collecting the counts and converting them
 // to LCOV BRDA/BRF/BRH records is handled in a later phase.
-func instrumentForBranchCoverage(infiles, outfiles []string) (string, error) {
+//
+// importPath identifies the package in the shared branchcoverdata registry that
+// the generated runtime registers with via an injected init.
+func instrumentForBranchCoverage(importPath string, infiles, outfiles []string) (string, error) {
 	if len(infiles) != len(outfiles) {
 		return "", fmt.Errorf("instrumentForBranchCoverage: %d input files but %d output files", len(infiles), len(outfiles))
 	}
@@ -143,41 +146,50 @@ func instrumentForBranchCoverage(infiles, outfiles []string) (string, error) {
 	}
 
 	runtimeFile := filepath.Join(filepath.Dir(outfiles[0]), "gobco_runtime.go")
-	runtime := generateBranchRuntime(pkgName, inst.conds)
+	runtime := generateBranchRuntime(pkgName, importPath, inst.conds)
 	if err := os.WriteFile(runtimeFile, []byte(runtime), writeFileMode); err != nil {
 		return "", fmt.Errorf("instrumentForBranchCoverage: writing runtime: %w", err)
 	}
 	return runtimeFile, nil
 }
 
-// generateBranchRuntime returns the source of a self-contained per-package
-// runtime file that defines GobcoCover and the package's condition table.
-//
-// TODO(branch-coverage): replace this self-contained runtime with registration
-// against a shared //go/tools/branchcoverdata package so that branch counts from
-// all packages linked into a single test binary can be collected and converted
-// to LCOV.
-func generateBranchRuntime(pkgName string, conds []cond) string {
+// branchcoverdataPath is the import path of the shared registry package that
+// collects branch (decision) coverage data from all instrumented packages.
+const branchcoverdataPath = "github.com/bazelbuild/rules_go/go/tools/branchcoverdata"
+
+// generateBranchRuntime returns the source of a per-package runtime file that
+// defines GobcoCover and a live counter slice, and registers the package's
+// condition table with the shared branchcoverdata registry via an injected
+// init. The counter slice is registered by reference so the registry observes
+// updates made by GobcoCover. Counts[2*i] and Counts[2*i+1] hold condition i's
+// true and false counts respectively.
+func generateBranchRuntime(pkgName, importPath string, conds []cond) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "package %s\n\n", pkgName)
-	sb.WriteString("type gobcoCond struct {\n")
-	sb.WriteString("\tStart      string\n")
-	sb.WriteString("\tCode       string\n")
-	sb.WriteString("\tTrueCount  int\n")
-	sb.WriteString("\tFalseCount int\n")
-	sb.WriteString("}\n\n")
-	sb.WriteString("var gobcoCounts = []gobcoCond{\n")
-	for _, c := range conds {
-		fmt.Fprintf(&sb, "\t{%q, %q, 0, 0},\n", c.pos, c.text)
-	}
-	sb.WriteString("}\n\n")
+	fmt.Fprintf(&sb, "import branchcoverdata %q\n\n", branchcoverdataPath)
+	fmt.Fprintf(&sb, "var gobcoCounts = make([]uint32, %d)\n\n", 2*len(conds))
 	sb.WriteString("func GobcoCover(idx int, cond bool) bool {\n")
 	sb.WriteString("\tif cond {\n")
-	sb.WriteString("\t\tgobcoCounts[idx].TrueCount++\n")
+	sb.WriteString("\t\tgobcoCounts[2*idx]++\n")
 	sb.WriteString("\t} else {\n")
-	sb.WriteString("\t\tgobcoCounts[idx].FalseCount++\n")
+	sb.WriteString("\t\tgobcoCounts[2*idx+1]++\n")
 	sb.WriteString("\t}\n")
 	sb.WriteString("\treturn cond\n")
+	sb.WriteString("}\n\n")
+	sb.WriteString("func init() {\n")
+	fmt.Fprintf(&sb, "\tbranchcoverdata.RegisterCond(%q,\n", importPath)
+	sb.WriteString("\t\t[]string{\n")
+	for _, c := range conds {
+		fmt.Fprintf(&sb, "\t\t\t%q,\n", c.pos)
+	}
+	sb.WriteString("\t\t},\n")
+	sb.WriteString("\t\t[]string{\n")
+	for _, c := range conds {
+		fmt.Fprintf(&sb, "\t\t\t%q,\n", c.text)
+	}
+	sb.WriteString("\t\t},\n")
+	sb.WriteString("\t\tgobcoCounts,\n")
+	sb.WriteString("\t)\n")
 	sb.WriteString("}\n")
 	return sb.String()
 }

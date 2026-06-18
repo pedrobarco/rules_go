@@ -4,6 +4,7 @@ filegroup(
     srcs = [
         "//go/tools/bazel:all_files",
         "//go/tools/bazel_testing:all_files",
+        "//go/tools/branchcoverdata:all_files",
         "//go/tools/builders:all_files",
         "//go/tools/bzltestutil:all_files",
         "//go/tools/coverdata:all_files",

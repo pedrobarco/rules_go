@@ -325,7 +325,7 @@ func compileArchive(
 				// Experimental: branch (decision) coverage via the vendored
 				// gobco instrumenter. This runs instead of "go tool cover",
 				// which cannot emit branch coverage.
-				runtimeFile, err := instrumentForBranchCoverage(coverIn, coverOut)
+				runtimeFile, err := instrumentForBranchCoverage(importPath, coverIn, coverOut)
 				if err != nil {
 					return err
 				}
@@ -399,7 +399,7 @@ func compileArchive(
 		gcFlags = append(gcFlags, "-trimpath="+trimPath)
 	}
 
-	importcfgPath, err := checkImportsAndBuildCfg(goenv, importPath, srcs, deps, packageListPath, recompileInternalDeps, compilingWithCgo, coverMode, workDir)
+	importcfgPath, err := checkImportsAndBuildCfg(goenv, importPath, srcs, deps, packageListPath, recompileInternalDeps, compilingWithCgo, coverMode, experimentalBranchCoverage, workDir)
 	if err != nil {
 		return err
 	}
@@ -504,7 +504,7 @@ func compileArchive(
 	return nil
 }
 
-func checkImportsAndBuildCfg(goenv *env, importPath string, srcs archiveSrcs, deps []archive, packageListPath string, recompileInternalDeps []string, compilingWithCgo bool, coverMode string, workDir string) (string, error) {
+func checkImportsAndBuildCfg(goenv *env, importPath string, srcs archiveSrcs, deps []archive, packageListPath string, recompileInternalDeps []string, compilingWithCgo bool, coverMode string, experimentalBranchCoverage bool, workDir string) (string, error) {
 	// Check that the filtered sources don't import anything outside of
 	// the standard library and the direct dependencies.
 	imports, err := checkImports(srcs.goSrcs, deps, packageListPath, importPath, recompileInternalDeps)
@@ -534,6 +534,20 @@ func checkImportsAndBuildCfg(goenv *env, importPath string, srcs archiveSrcs, de
 		}
 		imports[coverdataPath] = coverdata
 		imports["runtime/coverage"] = nil
+	}
+	if experimentalBranchCoverage {
+		// branchcoverdataPath is defined in cover.go.
+		var branchcoverdata *archive
+		for i := range deps {
+			if deps[i].importPath == branchcoverdataPath {
+				branchcoverdata = &deps[i]
+				break
+			}
+		}
+		if branchcoverdata == nil {
+			return "", errors.New("branch coverage requested but branchcoverdata dependency not provided")
+		}
+		imports[branchcoverdataPath] = branchcoverdata
 	}
 
 	// Build an importcfg file for the compiler.

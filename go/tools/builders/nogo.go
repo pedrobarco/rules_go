@@ -81,7 +81,7 @@ func nogo(args []string) error {
 	defer cleanup()
 
 	compilingWithCgo := os.Getenv("CGO_ENABLED") == "1" && haveCgo
-	importcfgPath, err := checkImportsAndBuildCfg(goenv, importPath, srcs, deps, packageListPath, recompileInternalDeps, compilingWithCgo, coverMode, workDir)
+	importcfgPath, err := checkImportsAndBuildCfg(goenv, importPath, srcs, deps, packageListPath, recompileInternalDeps, compilingWithCgo, coverMode, false, workDir)
 	if err != nil {
 		return err
 	}

@@ -85,12 +85,20 @@ build.
   and `generateBranchRuntime(...)` in `go/tools/builders/cover.go`. Added a
   `-experimental_branch_coverage` builder flag in `compilepkg.go`, threaded into
   `compileArchive`, where (when set) it branch-instruments the cover srcs and
-  appends a self-contained per-package runtime (`gobco_runtime.go`, defining
-  `GobcoCover` + the condition table) instead of running `go tool cover`. The
-  shared-registry `init()` registration is deferred to Phase 2 (see TODO in
-  `generateBranchRuntime`). Starlark wiring of the flag remains Phase 4.
-- **Phase 2 — Registry.** Add `//go/tools/branchcoverdata` (analogue of
-  `coverdata`); auto-inject as a dep in `checkImportsAndBuildCfg` when branch mode on.
+  appends a per-package runtime (`gobco_runtime.go`, defining `GobcoCover` + a
+  live counter slice) instead of running `go tool cover`. Starlark wiring of the
+  flag remains Phase 4.
+- **Phase 2 — Registry. [DONE]** Added `//go/tools/branchcoverdata` (analogue of
+  `coverdata`): a `go_tool_library` exposing `RegisterCond(importPath, pos, code,
+  counts)` and a `Conditions` map keyed by import path. `generateBranchRuntime`
+  now imports it and injects an `init()` that registers the package's parallel
+  `pos`/`code` tables plus the `gobcoCounts []uint32` slice **by reference**
+  (`counts[2*i]`/`counts[2*i+1]` are condition i's true/false counts), so counts
+  from every linked package are collectible at exit. `instrumentForBranchCoverage`
+  now takes the `importPath`; `checkImportsAndBuildCfg` auto-injects the
+  `branchcoverdata` archive into the importcfg when branch mode is on (erroring if
+  the rule did not supply it — that provisioning is Phase 4). `cover_test.go`
+  type-checks the generated package against a `branchcoverdata` stub.
 - **Phase 3 — Collection + conversion.** In `go/tools/bzltestutil`, read branch
   counters at exit and emit LCOV `BRDA:`/`BRF:`/`BRH:` merged with the existing
   `DA:` records. Wire finalize into rules_go's generated test main.
@@ -121,7 +129,7 @@ build.
 - `go/tools/builders/BUILD.bazel` — vendored files added to `builder_srcs` and
   `cover_test`. [DONE]
 - `go/tools/builders/cover_test.go` — `TestInstrumentForBranchCoverage`. [DONE]
-- `go/tools/branchcoverdata/` — new registry package.
+- `go/tools/branchcoverdata/` — new registry package (`RegisterCond` + `Conditions`). [DONE]
 - `go/tools/bzltestutil/lcov.go` (or a sibling) — BRDA/BRF/BRH emission.
 - `go/private/context.bzl`, `go/private/actions/archive.bzl`,
   `go/private/actions/compilepkg.bzl`, `go/private/rules/test.bzl` — wiring.
