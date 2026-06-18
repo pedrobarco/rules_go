@@ -1,0 +1,19 @@
+# Targets for the coverage example.
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# The library under test. Its sources are what gets instrumented for coverage.
+go_library(
+    name = "greeting",
+    srcs = ["greeting.go"],
+    importpath = "github.com/bazel-contrib/rules_go/examples/coverage",
+    visibility = ["//visibility:public"],
+)
+
+# Running `bazel coverage //:greeting_test` instruments the embedded library,
+# runs the test, and writes an LCOV report to
+# bazel-testlogs/greeting_test/coverage.dat.
+go_test(
+    name = "greeting_test",
+    srcs = ["greeting_test.go"],
+    embed = [":greeting"],
+)

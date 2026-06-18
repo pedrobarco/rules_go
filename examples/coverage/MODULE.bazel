@@ -1,0 +1,23 @@
+# A MODULE.bazel marks the root directory of a standalone Bazel workspace.
+#
+# This example demonstrates `bazel coverage` support in rules_go.
+
+module(name = "coverage_example")
+
+# We depend on rules_go for the Go rules. The version below is only a
+# placeholder: the local_path_override right after it makes Bazel use the
+# rules_go checkout that contains this example (../..) instead of a released
+# version. That way `bazel coverage` exercises the *local* coverage
+# instrumentation code (go/tools/builders/cover.go, go/private/rules/test.bzl,
+# go/tools/bzltestutil/lcov.go, ...).
+bazel_dep(name = "rules_go", version = "0.61.1")
+
+local_path_override(
+    module_name = "rules_go",
+    path = "../..",
+)
+
+# Download and configure a hermetic Go toolchain. Coverage uses Go's
+# "coverage redesign" APIs, so a 1.24+ SDK is required.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.24.4")

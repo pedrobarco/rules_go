@@ -28,6 +28,8 @@ go_test(
         "edit.go",
         "env.go",
         "flags.go",
+        "gobco_codegen.go",
+        "gobco_instrumenter.go",
     ],
 )
 
@@ -114,6 +116,8 @@ filegroup(
         "flags.go",
         "generate_nogo_main.go",
         "generate_test_main.go",
+        "gobco_codegen.go",
+        "gobco_instrumenter.go",
         "importcfg.go",
         "link.go",
         "nogo.go",

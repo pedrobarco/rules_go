@@ -45,6 +45,7 @@ func compilePkg(args []string) error {
 	var testFilter string
 	var gcFlags, asmFlags, cppFlags, cFlags, cxxFlags, objcFlags, objcxxFlags, ldFlags quoteMultiFlag
 	var coverFormat string
+	var experimentalBranchCoverage bool
 	var pgoprofile string
 	fs.StringVar(&pack, "pack", "", "Path of the pack tool.")
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, .cc, .m, .mm, .s, or .S file to be filtered and compiled")
@@ -71,6 +72,7 @@ func compilePkg(args []string) error {
 	fs.StringVar(&cgoGoSrcsPath, "cgo_go_srcs", "", "The directory to emit cgo-generated Go sources for nogo consumption to")
 	fs.StringVar(&testFilter, "testfilter", "off", "Controls test package filtering")
 	fs.StringVar(&coverFormat, "cover_format", "", "Emit source file paths in coverage instrumentation suitable for the specified coverage format")
+	fs.BoolVar(&experimentalBranchCoverage, "experimental_branch_coverage", false, "Experimental: instrument for branch (decision) coverage instead of statement coverage.")
 	fs.Var(&recompileInternalDeps, "recompile_internal_deps", "The import path of the direct dependencies that needs to be recompiled.")
 	fs.StringVar(&pgoprofile, "pgoprofile", "", "The pprof profile to consider for profile guided optimization.")
 	if err := fs.Parse(args); err != nil {
@@ -134,6 +136,7 @@ func compilePkg(args []string) error {
 		cgoExportHPath,
 		cgoGoSrcsPath,
 		coverFormat,
+		experimentalBranchCoverage,
 		recompileInternalDeps,
 		pgoprofile)
 }
@@ -166,6 +169,7 @@ func compileArchive(
 	cgoExportHPath string,
 	cgoGoSrcsForNogoPath string,
 	coverFormat string,
+	experimentalBranchCoverage bool,
 	recompileInternalDeps []string,
 	pgoprofile string,
 ) error {
@@ -317,12 +321,23 @@ func compileArchive(
 		sum := sha256.Sum256([]byte(importPath))
 		coverVar := fmt.Sprintf("goCover_%x_", sum[:6])
 		if len(coverOut) > 0 {
-			coverageCfg = workDir + "pkgcfg.txt"
-			coverOut, err := instrumentForCoverage(goenv, importPath, packageName, coverIn, coverVar, coverMode, coverOut, workDir, relCoverPath, srcPathMapping)
-			if err != nil {
-				return err
+			if experimentalBranchCoverage {
+				// Experimental: branch (decision) coverage via the vendored
+				// gobco instrumenter. This runs instead of "go tool cover",
+				// which cannot emit branch coverage.
+				runtimeFile, err := instrumentForBranchCoverage(coverIn, coverOut)
+				if err != nil {
+					return err
+				}
+				goSrcs = append(goSrcs, runtimeFile)
+			} else {
+				coverageCfg = workDir + "pkgcfg.txt"
+				coverOut, err := instrumentForCoverage(goenv, importPath, packageName, coverIn, coverVar, coverMode, coverOut, workDir, relCoverPath, srcPathMapping)
+				if err != nil {
+					return err
+				}
+				goSrcs = append(goSrcs, coverOut[0])
 			}
-			goSrcs = append(goSrcs, coverOut[0])
 		}
 	}
 

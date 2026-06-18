@@ -18,12 +18,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
-	"go/parser"
-	"go/token"
 	"strconv"
+	"strings"
 )
 
 const writeFileMode = 0o666
@@ -91,6 +93,93 @@ func instrumentForCoverage(
 		}
 	}
 	return outputFiles, nil
+}
+
+// instrumentForBranchCoverage rewrites the given Go source files for branch
+// (decision) coverage using the vendored gobco instrumenter (see
+// gobco_instrumenter.go), writing the instrumented sources to outfiles. It also
+// writes a per-package runtime file into the same directory as outfiles[0]
+// (defining GobcoCover and the package's condition table) and returns its path,
+// so the caller can add it to the package's sources.
+//
+// This path is gated behind the experimental_branch_coverage build setting and
+// currently runs as an alternative to "go tool cover" statement instrumentation
+// (which cannot emit branch coverage). Collecting the counts and converting them
+// to LCOV BRDA/BRF/BRH records is handled in a later phase.
+func instrumentForBranchCoverage(infiles, outfiles []string) (string, error) {
+	if len(infiles) != len(outfiles) {
+		return "", fmt.Errorf("instrumentForBranchCoverage: %d input files but %d output files", len(infiles), len(outfiles))
+	}
+
+	fset := token.NewFileSet()
+	parsed := make([]*ast.File, len(infiles))
+	for idx, in := range infiles {
+		src, err := os.ReadFile(in)
+		if err != nil {
+			return "", fmt.Errorf("instrumentForBranchCoverage: reading source: %w", err)
+		}
+		f, err := parser.ParseFile(fset, in, src, parser.ParseComments)
+		if err != nil {
+			return "", fmt.Errorf("instrumentForBranchCoverage: parsing source: %w", err)
+		}
+		parsed[idx] = f
+	}
+
+	// Resolve types once over the original (uninstrumented) files, before any
+	// rewriting invalidates the expression nodes used as map keys.
+	inst := newBranchInstrumenter(fset)
+	inst.resolveTypes(parsed)
+
+	pkgName := parsed[0].Name.Name
+	for idx, f := range parsed {
+		inst.instrumentFileNode(f)
+		var out bytes.Buffer
+		if err := printer.Fprint(&out, fset, f); err != nil {
+			return "", fmt.Errorf("instrumentForBranchCoverage: formatting instrumented source: %w", err)
+		}
+		if err := os.WriteFile(outfiles[idx], out.Bytes(), writeFileMode); err != nil {
+			return "", fmt.Errorf("instrumentForBranchCoverage: writing instrumented source: %w", err)
+		}
+	}
+
+	runtimeFile := filepath.Join(filepath.Dir(outfiles[0]), "gobco_runtime.go")
+	runtime := generateBranchRuntime(pkgName, inst.conds)
+	if err := os.WriteFile(runtimeFile, []byte(runtime), writeFileMode); err != nil {
+		return "", fmt.Errorf("instrumentForBranchCoverage: writing runtime: %w", err)
+	}
+	return runtimeFile, nil
+}
+
+// generateBranchRuntime returns the source of a self-contained per-package
+// runtime file that defines GobcoCover and the package's condition table.
+//
+// TODO(branch-coverage): replace this self-contained runtime with registration
+// against a shared //go/tools/branchcoverdata package so that branch counts from
+// all packages linked into a single test binary can be collected and converted
+// to LCOV.
+func generateBranchRuntime(pkgName string, conds []cond) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "package %s\n\n", pkgName)
+	sb.WriteString("type gobcoCond struct {\n")
+	sb.WriteString("\tStart      string\n")
+	sb.WriteString("\tCode       string\n")
+	sb.WriteString("\tTrueCount  int\n")
+	sb.WriteString("\tFalseCount int\n")
+	sb.WriteString("}\n\n")
+	sb.WriteString("var gobcoCounts = []gobcoCond{\n")
+	for _, c := range conds {
+		fmt.Fprintf(&sb, "\t{%q, %q, 0, 0},\n", c.pos, c.text)
+	}
+	sb.WriteString("}\n\n")
+	sb.WriteString("func GobcoCover(idx int, cond bool) bool {\n")
+	sb.WriteString("\tif cond {\n")
+	sb.WriteString("\t\tgobcoCounts[idx].TrueCount++\n")
+	sb.WriteString("\t} else {\n")
+	sb.WriteString("\t\tgobcoCounts[idx].FalseCount++\n")
+	sb.WriteString("\t}\n")
+	sb.WriteString("\treturn cond\n")
+	sb.WriteString("}\n")
+	return sb.String()
 }
 
 // coverPkgConfig matches https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/cmd/internal/cov/covcmd/cmddefs.go;l=18
