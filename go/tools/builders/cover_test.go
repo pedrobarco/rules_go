@@ -165,7 +165,7 @@ func Classify(n int) string {
 		t.Fatalf("writing input: %v", err)
 	}
 
-	runtimeFile, err := instrumentForBranchCoverage(importPath, []string{in}, []string{out})
+	runtimeFile, err := instrumentForBranchCoverage(importPath, []string{in}, []string{"sample.go"}, []string{out})
 	if err != nil {
 		t.Fatalf("instrumentForBranchCoverage: %v", err)
 	}

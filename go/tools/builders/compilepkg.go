@@ -267,6 +267,7 @@ func compileArchive(
 
 		var (
 			coverIn        []string
+			coverSrcNames  []string
 			coverOut       []string
 			srcPathMapping = make(map[string]string)
 		)
@@ -306,6 +307,10 @@ func compileArchive(
 			coverSrc := filepath.Join(workDir, fmt.Sprintf("cover_%d.go", i))
 
 			coverIn = append(coverIn, origSrc)
+			// The exec-root-relative source path, used as the file name for
+			// branch coverage condition positions so they line up with the
+			// SF: records emitted for line coverage.
+			coverSrcNames = append(coverSrcNames, relCoverPath[origSrc])
 			coverOut = append(coverOut, coverSrc)
 
 			if i < len(goSrcs) {
@@ -325,7 +330,7 @@ func compileArchive(
 				// Experimental: branch (decision) coverage via the vendored
 				// gobco instrumenter. This runs instead of "go tool cover",
 				// which cannot emit branch coverage.
-				runtimeFile, err := instrumentForBranchCoverage(importPath, coverIn, coverOut)
+				runtimeFile, err := instrumentForBranchCoverage(importPath, coverIn, coverSrcNames, coverOut)
 				if err != nil {
 					return err
 				}

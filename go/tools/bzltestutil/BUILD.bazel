@@ -12,6 +12,7 @@ go_tool_library(
     importpath = "github.com/bazelbuild/rules_go/go/tools/bzltestutil",
     visibility = ["//visibility:public"],
     deps = [
+        "//go/tools/branchcoverdata",
         "//go/tools/bzltestutil/chdir",
         "//go/tools/coverdata",
     ],

@@ -99,9 +99,22 @@ build.
   `branchcoverdata` archive into the importcfg when branch mode is on (erroring if
   the rule did not supply it — that provisioning is Phase 4). `cover_test.go`
   type-checks the generated package against a `branchcoverdata` stub.
-- **Phase 3 — Collection + conversion.** In `go/tools/bzltestutil`, read branch
-  counters at exit and emit LCOV `BRDA:`/`BRF:`/`BRH:` merged with the existing
-  `DA:` records. Wire finalize into rules_go's generated test main.
+- **Phase 3 — Collection + conversion. [DONE]** `go/tools/bzltestutil/lcov.go`
+  now reads `branchcoverdata.Conditions` (via `collectBranchData`, grouped by the
+  exec-root-relative source path encoded in each condition's position) and emits
+  LCOV `BRDA:`/`BRF:`/`BRH:` records. Branch records are merged into the per-file
+  `SF:` blocks alongside the existing `DA:` records (`emitLcovLines`), and files
+  with branch data but no statement coverage get branch-only `SF:` blocks
+  (`emitRemainingBranches`). Each condition emits two `BRDA` branches (0=false,
+  1=true) keyed by condition index as the block, reporting `-` when the condition
+  was never evaluated. To keep positions aligned with line coverage,
+  `instrumentForBranchCoverage` now takes per-file `srcNames` and parses each
+  source under that name. No `generate_test_main.go` change was needed: both exit
+  paths already funnel branch emission through `bzltestutil` — the legacy
+  `testdeps.CoverProcessTestDirFunc` calls `ConvertCoverToLcov` (now also emits
+  branch-only output when no statement profile exists), and the Go 1.24+ `bincov`
+  exit hook calls `ConvertCoverFromReaderToLcov`; both reach the shared
+  `convertCoverToLcov`. `branchcoverdata` is now a dep of `bzltestutil`.
 - **Phase 4 — Starlark wiring.** Add `experimental_branch_coverage` build setting;
   thread it `context.bzl` -> `archive.bzl` -> `compilepkg.bzl` as a builder flag;
   set up converter/env in `test.bzl`.
@@ -130,7 +143,9 @@ build.
   `cover_test`. [DONE]
 - `go/tools/builders/cover_test.go` — `TestInstrumentForBranchCoverage`. [DONE]
 - `go/tools/branchcoverdata/` — new registry package (`RegisterCond` + `Conditions`). [DONE]
-- `go/tools/bzltestutil/lcov.go` (or a sibling) — BRDA/BRF/BRH emission.
+- `go/tools/bzltestutil/lcov.go` — BRDA/BRF/BRH emission merged into the LCOV
+  records; `lcov_test.go` covers it; `BUILD.bazel` gains the `branchcoverdata`
+  dep. [DONE]
 - `go/private/context.bzl`, `go/private/actions/archive.bzl`,
   `go/private/actions/compilepkg.bzl`, `go/private/rules/test.bzl` — wiring.
 - `go/config/BUILD.bazel` — `experimental_branch_coverage` build setting.

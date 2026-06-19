@@ -103,15 +103,17 @@ func instrumentForCoverage(
 // so the caller can add it to the package's sources.
 //
 // This path is gated behind the experimental_branch_coverage build setting and
-// currently runs as an alternative to "go tool cover" statement instrumentation
-// (which cannot emit branch coverage). Collecting the counts and converting them
-// to LCOV BRDA/BRF/BRH records is handled in a later phase.
+// runs as an alternative to "go tool cover" statement instrumentation (which
+// cannot emit branch coverage). The recorded condition positions use the
+// corresponding srcNames entry as the file name, so the positions registered
+// with branchcoverdata are exec-root-relative source paths that match the
+// SF: records emitted for line coverage.
 //
 // importPath identifies the package in the shared branchcoverdata registry that
 // the generated runtime registers with via an injected init.
-func instrumentForBranchCoverage(importPath string, infiles, outfiles []string) (string, error) {
-	if len(infiles) != len(outfiles) {
-		return "", fmt.Errorf("instrumentForBranchCoverage: %d input files but %d output files", len(infiles), len(outfiles))
+func instrumentForBranchCoverage(importPath string, infiles, srcNames, outfiles []string) (string, error) {
+	if len(infiles) != len(outfiles) || len(infiles) != len(srcNames) {
+		return "", fmt.Errorf("instrumentForBranchCoverage: %d input files, %d source names, %d output files", len(infiles), len(srcNames), len(outfiles))
 	}
 
 	fset := token.NewFileSet()
@@ -121,7 +123,7 @@ func instrumentForBranchCoverage(importPath string, infiles, outfiles []string) 
 		if err != nil {
 			return "", fmt.Errorf("instrumentForBranchCoverage: reading source: %w", err)
 		}
-		f, err := parser.ParseFile(fset, in, src, parser.ParseComments)
+		f, err := parser.ParseFile(fset, srcNames[idx], src, parser.ParseComments)
 		if err != nil {
 			return "", fmt.Errorf("instrumentForBranchCoverage: parsing source: %w", err)
 		}
