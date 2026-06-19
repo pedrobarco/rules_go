@@ -63,6 +63,7 @@ nogo(
 # go_context_data collects build options and is depended on by all Go targets.
 go_context_data(
     name = "go_context_data",
+    branchcoverdata = "//go/tools/branchcoverdata",
     coverdata = "//go/tools/coverdata",
     go_config = ":go_config",
     stdlib = ":stdlib",
@@ -93,6 +94,7 @@ go_config(
         "//go/private:is_compilation_mode_dbg": "//go/private:always_true",
         "//conditions:default": "//go/config:debug",
     }),
+    experimental_branch_coverage = "//go/config:experimental_branch_coverage",
     export_stdlib = "//go/config:export_stdlib",
     gc_goopts = "//go/config:gc_goopts",
     gc_linkopts = "//go/config:gc_linkopts",

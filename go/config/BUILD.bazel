@@ -98,3 +98,9 @@ bool_flag(
     build_setting_default = False,
     visibility = ["//visibility:public"],
 )
+
+bool_flag(
+    name = "experimental_branch_coverage",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)

@@ -526,6 +526,7 @@ default_go_config_info = GoConfigInfo(
     arm = None,
     pgoprofile = None,
     export_stdlib = False,
+    experimental_branch_coverage = False,
 )
 
 def _cc_runtime_libs_for_mode(mode, cgo_tools):
@@ -716,6 +717,7 @@ def go_context(
         cgo_tools = cgo_tools,
         nogo = ctx.attr._nogo[DefaultInfo].files_to_run if hasattr(ctx.attr, "_nogo") else None,
         coverdata = go_context_info.coverdata if go_context_info else None,
+        branchcoverdata = go_context_info.branchcoverdata if go_context_info else None,
         coverage_enabled = ctx.configuration.coverage_enabled,
         coverage_instrumented = ctx.coverage_instrumented(),
         export_stdlib = go_config_info.export_stdlib,
@@ -757,6 +759,7 @@ def _go_context_data_impl(ctx):
     return [
         GoContextInfo(
             coverdata = ctx.attr.coverdata[0][GoArchive],
+            branchcoverdata = ctx.attr.branchcoverdata[0][GoArchive],
         ),
         ctx.attr.stdlib[GoStdLib],
         ctx.attr.go_config[GoConfigInfo],
@@ -766,6 +769,11 @@ go_context_data = rule(
     _go_context_data_impl,
     attrs = {
         "coverdata": attr.label(
+            mandatory = True,
+            cfg = non_request_nogo_transition,
+            providers = [GoArchive],
+        ),
+        "branchcoverdata": attr.label(
             mandatory = True,
             cfg = non_request_nogo_transition,
             providers = [GoArchive],
@@ -1053,6 +1061,7 @@ def _go_config_impl(ctx):
         arm = ctx.attr.arm,
         pgoprofile = pgoprofile,
         export_stdlib = ctx.attr.export_stdlib[BuildSettingInfo].value,
+        experimental_branch_coverage = ctx.attr.experimental_branch_coverage[BuildSettingInfo].value,
     )
     validate_mode(go_config_info)
 
@@ -1111,6 +1120,10 @@ go_config = rule(
         ),
         "export_stdlib": attr.label(
             mandatory = False,
+            providers = [BuildSettingInfo],
+        ),
+        "experimental_branch_coverage": attr.label(
+            mandatory = True,
             providers = [BuildSettingInfo],
         ),
     },

@@ -90,8 +90,14 @@ def emit_compilepkg(
     if have_nogo != (out_diagnostics != None):
         fail("nogo must be specified if and only if out_diagnostics is specified", nogo)
 
+    # Experimental branch (decision) coverage instruments via the vendored gobco
+    # instrumenter in the builder and collects counters through branchcoverdata,
+    # which must be available alongside coverdata.
+    branch_cover = cover and go.mode.experimental_branch_coverage and go.branchcoverdata != None
     if cover and go.coverdata:
         archives = archives + [go.coverdata]
+        if branch_cover:
+            archives = archives + [go.branchcoverdata]
 
     sdk = go.sdk
     inputs_direct = (sources + embedsrcs + [sdk.package_list, go.toolchain._pack] +
@@ -126,6 +132,8 @@ def emit_compilepkg(
         shared_args.add("-cover_mode", cover_mode)
         compile_args.add("-cover_format", go.mode.cover_format)
         compile_args.add_all(cover, before_each = "-cover")
+        if branch_cover:
+            compile_args.add("-experimental_branch_coverage")
 
     shared_args.add_all(archives, before_each = "-arc", map_each = _archive)
     if recompile_internal_deps:

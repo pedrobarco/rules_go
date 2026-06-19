@@ -115,9 +115,18 @@ build.
   branch-only output when no statement profile exists), and the Go 1.24+ `bincov`
   exit hook calls `ConvertCoverFromReaderToLcov`; both reach the shared
   `convertCoverToLcov`. `branchcoverdata` is now a dep of `bzltestutil`.
-- **Phase 4 — Starlark wiring.** Add `experimental_branch_coverage` build setting;
-  thread it `context.bzl` -> `archive.bzl` -> `compilepkg.bzl` as a builder flag;
-  set up converter/env in `test.bzl`.
+- **Phase 4 — Starlark wiring. [DONE]** Added the
+  `//go/config:experimental_branch_coverage` `bool_flag` and threaded it through
+  `go_config` (rule attr + `GoConfigInfo` + `default_go_config_info`) in
+  `context.bzl`, wired in the root `BUILD.bazel`. The `branchcoverdata` archive is
+  provisioned alongside `coverdata` via `go_context_data`/`GoContextInfo` and
+  exposed as `go.branchcoverdata`. In `compilepkg.bzl`, when coverage is active and
+  the flag is set, the `branchcoverdata` archive is added to `archives` and
+  `-experimental_branch_coverage` is passed to the `compilepkg` builder (in
+  `compile_args` only, so the `nogo` action — which doesn't define the flag — is
+  unaffected). No `archive.bzl`/`test.bzl` change was required. The flag is a
+  global feature flag (like `cover_format`/`export_stdlib`), so it is intentionally
+  not part of the `go/config` transition key set.
 - **Phase 5 — Example + docs + tests.** Wire into `examples/coverage`, fill in the
   README "Running branch coverage" section with the real command, and add a
   `go_bazel_test` (mirroring `tests/core/coverage`).
@@ -125,12 +134,32 @@ build.
 ## Acceptance criteria
 
 - `bazel coverage --@rules_go//go/config:experimental_branch_coverage //:greeting_test`
-  produces a `coverage.dat` containing both `DA:` (line) and `BRDA:`/`BRF:`/`BRH:`
-  (branch) records.
+  produces a `coverage.dat` containing `BRDA:`/`BRF:`/`BRH:` (branch) records.
+  This flag selects **branch (decision) coverage only**: the gobco instrumenter
+  runs *instead of* `go tool cover`, so instrumented packages emit branch records
+  but no `DA:`/`LH:`/`LF:` line records (see "Coverage model" and "Future work").
 - For `examples/coverage`: `Greet`'s `if name == ""` shows the **true** branch
   taken and the **false** branch not taken; `Farewell` shows both branches
   uncovered.
 - Statement coverage output is unchanged when the flag is off.
+
+## Coverage model (branch-only)
+
+The flag is intentionally **branch-only** for now. When it is set, packages are
+rewritten by the vendored gobco instrumenter, which wraps each controlling
+decision (`if`/`for`/`switch` conditions, including tagged and type switches) in a
+`GobcoCover(idx, cond)` call that records true/false counts. It does **not**
+decompose `&&`/`||`/`!` into sub-conditions, so the granularity is *decision
+coverage*, not full condition coverage or MC/DC. Because this runs instead of
+`go tool cover`, the instrumented package produces no statement profile and the
+resulting LCOV carries branch records but no line records for that package.
+
+This diverges from how other ecosystems behave — gcov/llvm-cov (C/C++) and JaCoCo
+(Java) produce line *and* branch data from a single instrumentation and treat
+branch coverage as additive to line coverage. Go has no single instrumenter that
+emits both (`go tool cover` does statements only; gobco does decisions only), so a
+combined report would require composing two passes. We accept branch-only for the
+experimental flag and capture the additive model as future work below.
 
 ## Files to touch (reference)
 
@@ -146,7 +175,47 @@ build.
 - `go/tools/bzltestutil/lcov.go` — BRDA/BRF/BRH emission merged into the LCOV
   records; `lcov_test.go` covers it; `BUILD.bazel` gains the `branchcoverdata`
   dep. [DONE]
-- `go/private/context.bzl`, `go/private/actions/archive.bzl`,
-  `go/private/actions/compilepkg.bzl`, `go/private/rules/test.bzl` — wiring.
-- `go/config/BUILD.bazel` — `experimental_branch_coverage` build setting.
+- `go/private/context.bzl` — `experimental_branch_coverage` flag through
+  `go_config`/`GoConfigInfo`; `branchcoverdata` archive via
+  `go_context_data`/`GoContextInfo`, exposed as `go.branchcoverdata`. [DONE]
+- `go/private/actions/compilepkg.bzl` — add `branchcoverdata` to archives and pass
+  `-experimental_branch_coverage` when branch coverage is active. [DONE]
+- `BUILD.bazel` (root) — wire flag into `go_config`, archive into
+  `go_context_data`. [DONE]
+- `go/config/BUILD.bazel` — `experimental_branch_coverage` build setting. [DONE]
 - `examples/coverage/{README.md,BUILD.bazel}` — demo + docs.
+
+## Future work
+
+- **Combined line + branch/decision coverage via a custom instrumenter.** The
+  idiomatic contract across other ecosystems (gcov/llvm-cov, JaCoCo) is that
+  branch coverage is *additive* to line coverage: one instrumentation pass emits
+  both, and turning branches on never drops line data. To match that, replace the
+  current either/or selection with a single custom instrumenter that, in one AST
+  rewrite, both (a) inserts statement-level counters (as `go tool cover` does) and
+  (b) wraps controlling decisions (as gobco does), registering with `coverdata`
+  and `branchcoverdata` respectively. The LCOV converter already merges `BRDA:`
+  records into the same per-file `SF:` block as `DA:` records, so the combined
+  output would carry both. An alternative, lower-effort path is to *chain* the two
+  existing passes (gobco first, then `go tool cover` on its output) since they
+  touch disjoint AST nodes and gobco captures decision positions from the original
+  source before cover runs; this needs careful handling of intermediate files,
+  pass ordering, and the cgo path.
+- **Full condition coverage / MC/DC.** Extend the instrumenter to decompose
+  `&&`/`||`/`!` into sub-conditions (gobco supports this in its non-branch mode),
+  raising granularity from decision coverage to condition coverage, and optionally
+  MC/DC — mirroring `gcc -fcondition-coverage` / `gcov --conditions` and the
+  in-progress Bazel MC/DC support.
+- **Flag shape: consider a coverage-mode enum.** The instrumentation type is a
+  separate axis from the existing `//go/config:cover_format` (which selects the
+  *output format*, `go_cover` vs `lcov`, and is LCOV-specific for branch data) and
+  from the internal `cover_mode` (`go tool cover -mode`, hardcoded to `atomic`).
+  Today branch is a standalone `experimental_branch_coverage` `bool_flag`, kept
+  this way for the experimental phase and consistent with the other
+  `experimental_*` bool flags. Once the additive instrumenter above lands, the
+  mutually exclusive strategies are better expressed as a single string enum, e.g.
+  `//go/config:experimental_coverage_mode = statement (default) | branch`, with
+  room for `statement_and_branch` and `condition`/`mcdc`. Branch data only exists
+  in the LCOV model, so any branch mode requires `cover_format = lcov`; we should
+  add a guard (fail fast, or ignore branch data) for the `go_cover` + branch
+  combination, which currently drops branch data silently.
