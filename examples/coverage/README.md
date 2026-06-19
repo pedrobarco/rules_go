@@ -30,6 +30,16 @@ This example targets two structural coverage types:
    execute every line while only ever exercising one side of a branch. LCOV
    represents it with `BRDA:`/`BRF:`/`BRH:` records.
 
+> **Experimental — branch-only.** rules_go supports branch coverage behind the
+> `--@rules_go//go/config:experimental_branch_coverage` flag. It is currently
+> *branch-only*: the branch instrumenter runs *instead of* `go tool cover` (which
+> cannot emit branch coverage), so the report carries `BRDA:`/`BRF:`/`BRH:`
+> records but **no** `DA:` line records for the instrumented package (the `LH:`/
+> `LF:` line totals are therefore `0`). It measures *decision* coverage (whole
+> `if`/`for`/`switch` conditions), not condition coverage or MC/DC, and requires
+> the default `lcov` format. See `BRANCH_COVERAGE_PLAN.md` for the coverage model
+> and the additive line+branch future work.
+
 ### Running line coverage
 
 Produced by the default `bazel coverage` run — see the run sections below. No
@@ -37,10 +47,34 @@ extra command is needed.
 
 ### Running branch coverage
 
-> **Note:** `go tool cover` does not emit branch coverage, so this requires a
-> dedicated branch-instrumentation action rather than a flag on the existing
-> one. The intended invocation will be documented here once that action is
-> wired into this example.
+```bash
+bazel coverage --@rules_go//go/config:experimental_branch_coverage //:greeting_test
+cat bazel-testlogs/greeting_test/coverage.dat
+```
+
+The report contains branch records instead of line records:
+
+```
+SF:greeting.go
+FNF:0
+FNH:0
+BRDA:8,0,0,1     # Greet `if name == ""`: false outcome taken once
+BRDA:8,0,1,1     # Greet `if name == ""`: true outcome taken once
+BRDA:17,1,0,-    # Farewell `if name == ""`: never evaluated
+BRDA:17,1,1,-
+BRF:4            # branches found (2 per decision)
+BRH:2            # branches hit (both outcomes of Greet's decision)
+LH:0             # no line (statement) records in branch-only mode
+LF:0
+end_of_record
+```
+
+`BRDA:<line>,<block>,<branch>,<taken>` reports one record per outcome: `<block>`
+is the decision's index in the file, `<branch>` is `0` for the false outcome and
+`1` for the true outcome, and `<taken>` is the hit count (`-` when the enclosing
+decision was never evaluated). `Greet`'s `if name == ""` is exercised both ways
+by the test, so both outcomes are taken; `Farewell` is never called, so both of
+its outcomes report `-`. There are no `DA:` records, so `LH:`/`LF:` are `0`.
 
 ## Run coverage (LCOV, the default format)
 
